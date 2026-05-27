@@ -1,0 +1,295 @@
+# Cotovia Clinic フィードバックシステム — 構築・運用・トラブル対応ドキュメント
+
+最終更新: 2026-05-27
+
+---
+
+## 1. システム全体像
+
+```
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│ GitHub Pages    │     │ Google Apps      │     │ Google Sheets   │
+│ (フロント)       │ ──▶ │ Script (バック)   │ ──▶ │ (DB)            │
+│  静的HTML×3     │     │  doPost受信       │     │  3シート         │
+└─────────────────┘     └──────────────────┘     └─────────────────┘
+        ▲
+        │
+   ┌────┴─────┬──────────┐
+   │          │          │
+Zoom連携    UE院QR     WC院QR
+(/)         (/ue/)     (/wc/)
+```
+
+### 構成要素
+| 要素 | 役割 | 場所 |
+|---|---|---|
+| GitHub リポジトリ | フロントエンドのソース | https://github.com/Cotovia-Cotovia/cotovia-feedback |
+| GitHub Pages | フォームページのホスティング（無料・HTTPS） | https://cotovia-cotovia.github.io/cotovia-feedback/ |
+| Google Apps Script | POST受信 → Sheets書き込み | https://script.google.com/ |
+| Google Sheets | 回答データの保存 | SHEET_ID `1tZFFm72l-yxNsllR048ylpA5rsSFx_-IDELKZuS9h1U` |
+
+### 公開URL一覧
+| 用途 | URL |
+|---|---|
+| オンライン診療（Zoom連携） | `https://cotovia-cotovia.github.io/cotovia-feedback/` |
+| UE院 店内QR | `https://cotovia-cotovia.github.io/cotovia-feedback/ue/` |
+| WC院 店内QR | `https://cotovia-cotovia.github.io/cotovia-feedback/wc/` |
+
+---
+
+## 2. データスキーマ
+
+各シート（`online_feedback` / `ue_feedback` / `wc_feedback`）は共通スキーマ：
+
+| 列 | キー | 内容 | 主な使い道 |
+|---|---|---|---|
+| A | 日時 | 送信時刻（JST） | 時系列分析 |
+| B | 評価（1-5） | 星の数 | 平均満足度 |
+| C | ご意見・ご感想 | 自由記述 | 内容分析 |
+| D | デバイス情報 | UAヘッダー（ブラウザ/OS） | トラブル切り分け |
+| E | 端末ID | localStorage の UUID | 同一端末の連投検知 |
+| F | ミーティング情報 | Zoom クエリパラメータ（meetingId, userNameなど） | 該当ミーティング特定 |
+| G | リファラー | document.referrer | Zoom経由か直接URLか判別 |
+
+UE/WC シートでは F列・G列は通常空欄（QRスキャンには Zoom 情報がないため）。
+
+---
+
+## 3. 別クリニックでの流用手順（テンプレート）
+
+クリニック名を `XYZ` とした例。所要時間: 約45分。
+
+### Step 1: スプレッドシート作成（5分）
+1. https://sheets.google.com/ で新規スプレッドシート作成
+2. 名前を「XYZ Clinic Feedback」に変更
+3. URL の `/d/` と `/edit` の間が **SHEET_ID** → メモ
+4. シートを3つ作成: `online_feedback`, `<location1>_feedback`, `<location2>_feedback`
+
+### Step 2: GAS プロジェクト作成（10分）
+1. https://script.google.com/ → 新しいプロジェクト
+2. 以下のコードを貼り付け（`SHEET_ID` と `SHEET_MAP` をクリニック用に変更）：
+
+```javascript
+const SHEET_ID = "YOUR_SHEET_ID_HERE";
+const SHEET_MAP = {
+  "online": "online_feedback",
+  "location1": "location1_feedback",
+  "location2": "location2_feedback"
+};
+const HEADERS = ["日時", "評価（1-5）", "ご意見・ご感想", "デバイス情報", "端末ID", "ミーティング情報", "リファラー"];
+
+function doPost(e) {
+  const data = JSON.parse(e.postData.contents);
+  const source = data.source || "online";
+  const sheetName = SHEET_MAP[source] || "unknown_feedback";
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let sheet = ss.getSheetByName(sheetName);
+  if (!sheet) { sheet = ss.insertSheet(sheetName); }
+  const currentRow1 = sheet.getRange(1, 1, 1, HEADERS.length).getValues()[0];
+  const headersMatch = currentRow1.every((cell, i) => cell === HEADERS[i]);
+  if (!headersMatch) {
+    sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+  }
+  sheet.appendRow([
+    data.timestamp || "", data.rating || "", data.comment || "",
+    data.userAgent || "", data.deviceId || "",
+    data.meetingInfo || "", data.referrer || ""
+  ]);
+  return ContentService.createTextOutput(JSON.stringify({ status: "ok" }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+```
+
+3. 保存（Ctrl+S）
+4. デプロイ → 新しいデプロイ → ウェブアプリ
+5. 設定:
+   - 実行ユーザー: **自分**
+   - アクセスできるユーザー: **全員**
+6. 権限承認 → デプロイ → **Web アプリ URL** をコピー（`https://script.google.com/macros/s/.../exec`）
+
+### Step 3: HTML 準備（5分）
+1. このリポジトリの `index.html`, `ue/index.html`, `wc/index.html` をコピー
+2. 各ファイル内の `GAS_URL` を新しいGAS URLに書き換え
+3. 各ファイル内の `source` 値を新拠点名に変更（例: `"ue"` → `"location1"`）
+4. タイトル（`<title>`）と本文の `<h1>` をクリニック名に変更
+
+### Step 4: GitHub リポジトリ作成 & デプロイ（10分）
+1. PowerShell で：
+   ```powershell
+   cd "C:\path\to\xyz-feedback"
+   git init
+   git config --local user.name "XYZ Clinic"
+   git config --local user.email "admin@xyzclinic.com"
+   git add .
+   git commit -m "Initial commit"
+   gh repo create xyz-feedback --public --source=. --remote=origin --push
+   gh api -X POST "repos/<GH_USER>/xyz-feedback/pages" -f "source[branch]=main" -f "source[path]=/"
+   ```
+2. 3〜5分後に `https://<GH_USER>.github.io/xyz-feedback/` で公開確認
+
+### Step 5: QR コード生成 & ポスター PDF（10分）
+PowerShell の自動生成スクリプト（このリポジトリの `scripts/generate-posters.ps1` 参照）を流用。
+変数 `$LOCS`、`$BASE`、`$BASE_URL` を新クリニック用に変更して実行。
+
+### Step 6: 動作確認（5分）
+- 各URLをブラウザで開き、星を選んで送信
+- Sheets の各シートに行が追加されることを確認
+- 同じブラウザから2回送信し、「端末ID」列に同じUUIDが入ることを確認
+
+---
+
+## 4. Zoom Meeting Survey 設定
+
+オンライン診療フィードバックを Zoom の「会議終了後アンケート」として表示する設定：
+
+### Account Owner / Admin 権限が必要
+
+1. https://zoom.us/ にログイン
+2. 左メニュー **Account Management** → **Account Settings**
+3. **Meeting** タブを選択
+4. **Meeting Survey** セクションを探す
+5. 以下を有効化：
+   - **Meeting Survey**: ON
+   - **Allow host to use a 3rd-party survey link**: ON
+6. **Use default survey** にチェック → URL欄に貼り付け：
+   `https://<GH_USER>.github.io/<repo-name>/`
+7. **Save**
+8. ミーティング終了時に自動でアンケートが表示されるよう、ホスト側の Meeting 設定でも **「Display end-of-meeting experience feedback survey」** を有効化
+
+### Zoom から自動で付くクエリパラメータ
+オンライン用 `index.html` は `window.location.search` を取得して `meetingInfo` 列に保存します。
+通常付与されるキー: `meetingId`, `meetingUuid`, `userName`, `userId` 等（Zoomバージョンにより変動）。
+
+---
+
+## 5. Google Sheets / GAS の容量・制限
+
+### スプレッドシート
+| 項目 | 制限 |
+|---|---|
+| セル総数 | **1000万セル/spreadsheet**（7列なら約140万行） |
+| 1シートのセル | 1000万まで |
+| 同時編集者 | 100人 |
+
+### Apps Script Web App
+| 項目 | 制限（無料アカウント） |
+|---|---|
+| 1日の URL Fetch | 20,000 回 |
+| 1日の実行時間合計 | 90 分 |
+| 1回の実行 | 最大 6 分 |
+| 同時実行 | 30 |
+
+### 想定運用との比較
+| 想定 | データ蓄積 | 制限到達まで |
+|---|---|---|
+| **1日10件** | 3,650/年 | 約 380 年で行制限 |
+| 1日100件 | 36,500/年 | 約 38 年 |
+| 1日1000件 | 365,000/年 | 約 3.8 年 |
+
+**結論**: 1日10件レベルなら問題なし。クリニックの臨床ボリュームで上限に当たる可能性は実質ゼロ。
+
+---
+
+## 6. トラブルシューティング
+
+### 「Sheets に記録されない」
+| 確認項目 | 解決 |
+|---|---|
+| GAS URL が HTML に正しく入っているか | `index.html` を grep して URL 確認 |
+| GAS の再デプロイ済みか | デプロイを管理 → 既存デプロイの新バージョン |
+| GAS の権限承認済みか | GAS エディタで `doPost` を手動実行して承認 |
+| SHEET_ID が正しいか | スプレッドシートのURL `/d/XXX/edit` の XXX 部分 |
+| シート名がGAS設定と一致 | `SHEET_MAP` の値とSheets タブ名を見比べる |
+
+### 「端末ID が入らない」
+| 原因 | 解決 |
+|---|---|
+| ブラウザのHTMLキャッシュ | Ctrl+Shift+R（Win）/ Cmd+Shift+R（Mac）でハードリロード |
+| GAS が古いバージョン | デプロイを管理から新バージョン作成 |
+| `localStorage` がブロックされている | プライベートブラウズモードの可能性。通常モードで再テスト |
+
+確認方法: フォームページで F12 → Console → `localStorage.getItem('cotovia_device_id')` 実行
+
+### 「ミーティング情報 が入らない（Zoom経由なのに）」
+| 原因 | 解決 |
+|---|---|
+| Zoom 側で 3rd-party survey 設定が ON になっていない | Zoom Account Settings → Meeting Survey 確認 |
+| ホスト側 Meeting で「end-of-meeting feedback survey」が OFF | ミーティング設定で ON にする |
+| 患者がアンケートをスキップ | これは仕様、対応不可 |
+
+### 「PDF が見切れる / 1ページに収まらない」
+| 原因 | 解決 |
+|---|---|
+| 印刷時の倍率が 100% | 印刷ダイアログで「**ページに合わせる / Fit to page**」を有効化 |
+| PDF 内部に複数ページがある | `cotovia_qr_v3.html` 内の `page-break-after: always` を `auto` に変更 |
+| デザイン自体が用紙より大きい | 自然寸法のPDF（210×330mm 等）を出して fit-to-page で印刷 |
+
+### 「GitHub Pages の URL が 404」
+- push 後の Pages ビルドに 1〜3 分かかる
+- `gh api "repos/OWNER/REPO/pages/builds/latest" --jq '.status'` で確認
+- `status: built` になるまで待つ
+- ビルドエラー時は `.error.message` を確認
+
+### 「Pages の更新が反映されない」
+- ブラウザキャッシュの可能性。シークレットウィンドウで開いて確認
+- Cloudflare/CDN キャッシュは GitHub Pages は約 10 分
+
+---
+
+## 7. メンテナンスチェックリスト
+
+### 月次
+- [ ] Sheets の行数を確認（10万行超えてきたら年次でアーカイブ検討）
+- [ ] スパム送信や明らかな自動入力（同一端末ID連投）の有無を確認
+- [ ] 平均評価と前月比較
+
+### 年次
+- [ ] GAS のデプロイバージョンを最新化（セキュリティパッチ反映のため）
+- [ ] GitHub Pages の証明書/ドメイン確認
+- [ ] GAS の URL が変わっていないか確認
+
+---
+
+## 8. 連投検知クエリ（Sheets 内で実行）
+
+任意の空きセルに以下を貼ると、同一端末IDからの2回以上の送信が一覧表示されます：
+
+```
+=QUERY(online_feedback!A:G, "SELECT E, COUNT(A) WHERE E IS NOT NULL GROUP BY E HAVING COUNT(A) > 1 ORDER BY COUNT(A) DESC", 1)
+```
+
+`online_feedback` の部分を `ue_feedback` や `wc_feedback` に変えれば他シートも分析可能。
+
+---
+
+## 9. ファイル構造（このリポジトリ）
+
+```
+cotovia-feedback/
+├── index.html              # オンライン用（Zoom連携あり）
+├── ue/
+│   └── index.html          # UE院 店内QR用
+├── wc/
+│   └── index.html          # WC院 店内QR用
+├── .gitignore              # デプロイ対象外（PDF/PNG/master-poster等）
+└── DEPLOYMENT.md           # 本ドキュメント
+
+# ローカルのみ（.gitignore で除外）
+├── cotovia_feedback_v4.html         # 元ソース（デプロイ前のオリジナル）
+├── cotovia_qr_v3.html               # ポスターデザイン（プレースホルダ付き）
+├── ue_qr.png, wc_qr.png             # QRコード画像
+├── cotovia_qr_{UE,WC}_{A4,A5,A6}.pdf # 印刷用ポスターPDF
+└── cotovia_github_pages_setup.md    # 初期セットアップ指示書（過去用）
+```
+
+---
+
+## 10. 緊急時の連絡・復旧
+
+GAS が動かない / Sheets が壊れた等で運用が止まったとき：
+
+1. **Sheets のバックアップ**: ファイル → 「コピーを作成」で別ファイルに退避
+2. **GAS の旧バージョン復旧**: GAS エディタ → デプロイを管理 → 過去バージョンに戻す
+3. **Pages の旧バージョン復旧**: `git log` で過去コミット確認 → `git revert <commit>`
+
+---

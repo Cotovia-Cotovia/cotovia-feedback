@@ -138,27 +138,75 @@ PowerShell の自動生成スクリプト（このリポジトリの `scripts/ge
 
 ---
 
-## 4. Zoom Meeting Survey 設定
+## 4. Zoom 運用方針（重要・2026-05-27 確定）
 
-オンライン診療フィードバックを Zoom の「会議終了後アンケート」として表示する設定：
+### 4.0 このシステムの位置づけ（前提）
+**「ポジティブフィードバックの収集装置」** として運用する。
 
-### Account Owner / Admin 権限が必要
+- ✅ 良い患者さんの声を収集してテスティモニアル・改善材料として活用
+- ✅ スタッフのモチベーション維持
+- ❌ **客観的な顧客満足度の測定ツールとしては使わない**
+- ❌ 集まる評価は selection bias（医師の Survey 設定判断に依存）があるため、対外公表時は「平均X星」ではなく具体的なコメント引用で使う
 
+この前提により、医師が Survey URL を毎回設定しなくても良い、受付やWebhookによる強制送信メカニズムは不要、という運用に落とし込む。
+
+### 4.1 採用するアプローチ
+**3rd-party survey link（会議終了時の自動オープン方式）** を継続使用する。
+
+理由：
+- 患者の行動コストが最小（ブラウザが自動で開く）
+- 想定回答率 70-90%（他方式の数倍）
+- 既存のカスタムページ・Sheets・端末ID連投検知などの仕掛けをフル活用できる
+- 1日10件規模なら手動設定コストは合計100秒/日で許容範囲
+
+### 4.2 不採用にした方式と理由
+| 方式 | 不採用理由 |
+|---|---|
+| QR背景のみで運用 | 患者がスマホでスキャンする必要があり回答率が大幅に低下（5-15%想定） |
+| Salepager等のZoom Marketplaceアプリ | 患者の Zoom Registration が前提となり、予約フロー全体の変更が必要 |
+| Zapier / Webhook 自動メール | 患者メアドの一元取得経路がない（現状） |
+| Zoom内蔵Survey | カスタムページ・Sheets連携・端末IDなど既存機能を全部失う |
+
+### 4.3 アカウント側設定（一度だけ）
+Account Owner / Admin 権限が必要。
 1. https://zoom.us/ にログイン
-2. 左メニュー **Account Management** → **Account Settings**
-3. **Meeting** タブを選択
-4. **Meeting Survey** セクションを探す
-5. 以下を有効化：
-   - **Meeting Survey**: ON
-   - **Allow host to use a 3rd-party survey link**: ON
-6. **Use default survey** にチェック → URL欄に貼り付け：
-   `https://<GH_USER>.github.io/<repo-name>/`
-7. **Save**
-8. ミーティング終了時に自動でアンケートが表示されるよう、ホスト側の Meeting 設定でも **「Display end-of-meeting experience feedback survey」** を有効化
+2. **Account Management** → **Account Settings** → **Meeting** タブ
+3. **Meeting Survey** セクション：
+   - メイントグル → **ON**
+   - **Allow host to use a 3rd-party survey link** → ✓ チェック
+   - **Add specified participant survey to all meetings** → ✗ チェック外す（これは Zoom 内蔵 Survey用）
+   - **Who can participate** → **External users only**
+   - **Exclude hosts and co-hosts from taking survey** → ✓ チェック
+4. **Save**
 
-### Zoom から自動で付くクエリパラメータ
-オンライン用 `index.html` は `window.location.search` を取得して `meetingInfo` 列に保存します。
+### 4.4 各ミーティングでの設定（毎回 10 秒）
+テンプレートに Survey URL は引き継がれないので、毎ミーティング個別設定が必要：
+
+1. ミーティング作成（テンプレ使用OK）
+2. ミーティング詳細ページ → **Survey** タブ
+3. **「Use a 3rd party survey」** ボタン
+4. URL 入力欄に以下を貼付：
+   ```
+   https://cotovia-cotovia.github.io/cotovia-feedback/
+   ```
+5. **Save**
+
+**コピペを楽にする小ワザ**：
+- ブラウザのブックマークバーに「Survey URL」というブックマークを作り、URL を上記に設定 → 毎回クリックで取得
+- Windows PowerToys / PhraseExpress でショートカット展開（例: `;feedback` → URL に展開）
+
+### 4.5 Zoom から自動で付くクエリパラメータ
+オンライン用 `index.html` は `window.location.search` を取得して `meetingInfo` 列に保存。
 通常付与されるキー: `meetingId`, `meetingUuid`, `userName`, `userId` 等（Zoomバージョンにより変動）。
+
+### 4.6 廃止アナウンスへの備え
+Zoom 設定画面に「Hosts will no longer be able to use 3rd-party survey links...」というアナウンスが出ている。
+- 正確な廃止日付は不明だが、6ヶ月〜1年で機能停止する可能性
+- 廃止時の代替手段は別途検討する（Zoom Registration + Webhook → Email など）
+- それまでは現運用を継続
+
+### 4.7 補助的な施策（任意）
+- `cotovia_zoom_background.png`: QRコード入り Zoom 仮想背景。Survey 設定漏れ時のフォールバック用。**メイン導線ではない**ため利用は任意。
 
 ---
 

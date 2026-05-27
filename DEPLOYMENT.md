@@ -332,7 +332,78 @@ cotovia-feedback/
 
 ---
 
-## 10. 緊急時の連絡・復旧
+## 10. 【保留中】Zoom 3rd-party 廃止後の移行マニュアル
+
+### 10.0 概要
+Zoom 3rd-party survey link が廃止されたら、**Zoom内蔵Survey + API同期**にリプレイスする。本格運用時 or 廃止が現実化した時に実施。
+
+### 10.1 Zoom 内蔵 Survey の作成
+1. Zoom 左サイドバー → Survey Management → **+ Create Survey**
+2. 設定：
+   - **Survey Name**: `本日のオンライン診療はいかがでしたか？`
+   - **Description**: `本日はご利用ありがとうございました。今後の改善のため、ご感想をお聞かせください。`
+   - **質問1** (Rating Scale 1-5): `総合評価をお聞かせください`
+   - **質問2** (Long Answer, 500文字): `ご意見・ご感想がございましたらお聞かせください`
+3. Save
+
+### 10.2 アカウント設定で Survey をデフォルト指定
+1. Account Settings → Meeting → Meeting Survey
+2. **Add specified participant survey to all meetings** → ON
+3. **Select Survey** → 10.1 で作成した Survey を選ぶ
+4. **Allow host to use a 3rd-party survey link** → OFF（混在を避ける）
+5. **Who can participate** → External users only
+6. Save
+
+### 10.3 Zoom Server-to-Server OAuth アプリ作成
+1. https://marketplace.zoom.us/ → Admin ログイン
+2. Develop → Build App → **Server-to-Server OAuth**
+3. 名前: `Cotovia Feedback Sync`
+4. App Credentials タブで以下をメモ：
+   - **Account ID**
+   - **Client ID**
+   - **Client Secret**
+5. Scopes タブで以下を追加：
+   - `report:read:admin`
+   - `meeting:read:admin`
+   - `user:read:admin`
+6. Activation タブ → Activate
+
+### 10.4 GAS に同期スクリプト追加
+GAS プロジェクトで File → New → Script file → 名前 `zoom_sync`
+コードは別ファイル `gas_zoom_sync.gs.txt` に保管（このリポジトリのローカル参照）。
+主な内容：`syncZoomSurveys()` 関数が `/v2/report/meetings/{uuid}/survey` を叩いて、過去36時間のミーティング全件の Survey 回答を `online_feedback` シートに追記する。
+
+### 10.5 Script Properties に認証情報を登録
+GAS → Project Settings → Script Properties：
+- `ZOOM_ACCOUNT_ID`: 10.3 でメモした値
+- `ZOOM_CLIENT_ID`: 同上
+- `ZOOM_CLIENT_SECRET`: 同上
+- `ZOOM_HOST_USER_ID`: オンライン診療ホストのZoomアカウント (例: `doctor@cotoviaclinic.com`)
+
+### 10.6 日次トリガー設定
+GAS → Triggers → + Add Trigger：
+- 関数: `syncZoomSurveys`
+- イベント: Time-driven / Day timer / **2am-3am**
+- Save
+
+### 10.7 動作確認
+- 翌日2時以降、`online_feedback` シートに前日のZoomサーベイ回答が追記されていること
+- 手動実行は GASエディタで `syncZoomSurveys` を選んで Run（初回は権限承認）
+
+### 10.8 移行時の注意
+- データ反映に**最大1時間のタイムラグ**あり（Zoom内部の集計処理）
+- 匿名回答は名前・メアドが空欄になる仕様
+- 既存の `online_feedback` シートのスキーマと互換性を維持（端末ID列は空白で書き込み）
+- 移行時はGAS側で**重複防止キー**として `zoom:{uuid}|{participant_id}` を使用
+
+### 10.9 廃止前にやっておくと楽な事前準備
+- [ ] Zoom Pro プラン継続確認
+- [ ] Admin アクセスがあること
+- [ ] ホストとなる Zoom ユーザーが固定であること（複数医師の場合は対応拡張必要）
+
+---
+
+## 11. 緊急時の連絡・復旧
 
 GAS が動かない / Sheets が壊れた等で運用が止まったとき：
 

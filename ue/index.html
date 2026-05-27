@@ -506,12 +506,20 @@
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span>送信中...';
     errorMsg.classList.remove('visible');
+    let deviceId = localStorage.getItem('cotovia_device_id');
+    if (!deviceId) {
+      deviceId = (window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : Date.now().toString(36) + '-' + Math.random().toString(36).substring(2, 10);
+      try { localStorage.setItem('cotovia_device_id', deviceId); } catch (e) {}
+    }
     const payload = {
       source:       "ue",
       rating:       selectedRating,
       comment:      comment,
       timestamp:    new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }),
       userAgent:    navigator.userAgent,
+      deviceId:     deviceId,
       meetingInfo:  '',
       referrer:     document.referrer || ''
     };

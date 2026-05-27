@@ -401,7 +401,7 @@
   <div class="card-bar"></div>
 
   <div class="form-content" id="formContent">
-    <h1>本日のオンライン診療は<br>いかがでしたか？</h1>
+    <h1>本日のご来院（WC院）は<br>いかがでしたか？</h1>
     <p class="subtitle">いただいたご意見は、より良い診療サービスの<br>向上のために大切に活用させていただきます。</p>
 
     <!-- 星評価 -->
@@ -506,16 +506,13 @@
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span>送信中...';
     errorMsg.classList.remove('visible');
-    const meetingInfo = window.location.search
-      ? window.location.search.replace(/^\?/, '')
-      : '';
     const payload = {
-      source:       "online",
+      source:       "wc",
       rating:       selectedRating,
       comment:      comment,
       timestamp:    new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }),
       userAgent:    navigator.userAgent,
-      meetingInfo:  meetingInfo,
+      meetingInfo:  '',
       referrer:     document.referrer || ''
     };
     try {

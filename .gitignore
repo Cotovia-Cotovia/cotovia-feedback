@@ -1,3 +1,7 @@
-﻿# Local-only files
+# Local-only files (not deployed to GitHub Pages)
 cotovia_feedback_v4.html
 cotovia_github_pages_setup.md
+cotovia_qr_v3.html
+*.pdf
+*.png
+_tmp_*
